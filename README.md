@@ -12,7 +12,7 @@ struct __attribute__((packed)) SENSOR_DATA {\
 	float	temp;\
 	float	humidity;\
 	float	pressure;\
-	float	battery;\ 
+	float	battery;\
 	float	spare1;\
 	float	spare2;\
 	int	checkend;\
