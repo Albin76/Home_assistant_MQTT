@@ -4,9 +4,9 @@ Sensors and control via MQTT
 This rep is focused on the HA/MQTT part. 
 
 
-struct __attribute__((packed)) SENSOR_DATA {		
-	int	checkstart;
-	int	sendno;
+struct __attribute__((packed)) SENSOR_DATA {
+'	int	checkstart;
+'	int	sendno;
 	int	sensor;
 	char	MQTT_sensor_topic[15];
 	int	millis;
