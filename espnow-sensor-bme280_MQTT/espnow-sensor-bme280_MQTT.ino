@@ -27,7 +27,7 @@ extern "C" {
 uint8_t remoteMac[] = {0x36, 0x33, 0x33, 0x33, 0x33, 0x33};
 
 #define WIFI_CHANNEL 1
-#define SLEEP_SECS 100 // 1 minute. can be removed for TPL5111
+#define SLEEP_SECS 600 // 1 minute. can be removed for TPL5111
 #define SLEEP_SECS_SHORT 60 // 1 minute. Used when failed wifi or failed espnow init
 #define SEND_TIMEOUT 300  // 245 millis seconds timeout. This does not work. If set to 450 it takes that. Do not get response I think. 
 #define CONNECTION_TIMEOUT 1000  // 
