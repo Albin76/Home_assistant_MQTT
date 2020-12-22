@@ -27,7 +27,7 @@ extern "C" {
 uint8_t remoteMac[] = {0x36, 0x33, 0x33, 0x33, 0x33, 0x33};
 
 #define WIFI_CHANNEL 1
-#define SLEEP_SECS 600 // 1 minute. can be removed for TPL5111
+#define SLEEP_SECS 500 // 5 minute. can be removed for TPL5111
 #define SLEEP_SECS_SHORT 60 // 1 minute. Used when failed wifi or failed espnow init
 #define SEND_TIMEOUT 300  // 245 millis seconds timeout. This does not work. If set to 450 it takes that. Do not get response I think. 
 #define CONNECTION_TIMEOUT 1000  // 
@@ -121,10 +121,13 @@ void setup() {
   readBME280();
   checkreadings();
   Serial.printf("After BME280 read: %i\n", millis());
-  //WiFi.mode(WIFI_STA); // Station mode for esp-now sensor node // these are not in the minimal example. Takes long time. +60ms
-  //WiFi.disconnect();
+  // readded WIFI_STA and Disconnect 2020-12-22
+  // https://randomnerdtutorials.com/esp-now-many-to-one-esp8266-nodemcu/
+    
+  WiFi.mode(WIFI_STA); // Station mode for esp-now sensor node // these are not in the minimal example. Takes long time. +60ms
+  WiFi.disconnect();
   //Serial.printf("After WIFI settings: %i\n", millis());
-
+  
   Serial.printf("This mac: %s, ", WiFi.macAddress().c_str()); 
   Serial.printf("target mac: %02x%02x%02x%02x%02x%02x", remoteMac[0], remoteMac[1], remoteMac[2], remoteMac[3], remoteMac[4], remoteMac[5]); 
   Serial.printf(", channel: %i\n", WIFI_CHANNEL); 
@@ -150,7 +153,7 @@ void setup() {
   */
 
   // testing vatiant.
-  SENDSTATUS = esp_now_register_send_cb(OnDataSent);
+  SENDSTATUS = esp_now_register_send_cb(OnDataSent);  // should it be between  esp_now_set_self_role and esp_now_add_peer as in randonmerdtutorials?
   
  
   uint8_t bs[sizeof(sensorData)];
