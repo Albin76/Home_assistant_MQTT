@@ -22,14 +22,26 @@ extern "C" {
  */
 uint8_t mac[] = {0x36, 0x33, 0x33, 0x33, 0x33, 0x33};
 void initVariant() {
+// Old code before 2020-12-22
+/*
   WiFi.mode(WIFI_AP);
   wifi_set_macaddr(SOFTAP_IF, &mac[0]);
+*/
+// new code as of 2020-12-22
+// https://randomnerdtutorials.com/get-change-esp32-esp8266-mac-address-arduino/
+// and
+// https://randomnerdtutorials.com/esp-now-many-to-one-esp8266-nodemcu/
+  WiFi.mode(WIFI_STA);
+  wifi_set_macaddr(STATION_IF, &mac[0]);
+  WiFi.disconnect();
 }
 
 void setup() {
   Serial.begin(115200); Serial.println();
   Serial.println("This is the ESP-NOW side ");
-  Serial.print("This node AP mac: "); Serial.println(WiFi.softAPmacAddress());
+
+// not using this anymore since 2020-12-22  
+//  Serial.print("This node AP mac: "); Serial.println(WiFi.softAPmacAddress());
   Serial.print("This node STA mac: "); Serial.println(WiFi.macAddress());
 
   initEspNow();
@@ -50,7 +62,12 @@ void initEspNow() {
     ESP.restart();
   }
 
-  esp_now_set_self_role(ESP_NOW_ROLE_COMBO);
+// Old code before 2020-12-22
+//  esp_now_set_self_role(ESP_NOW_ROLE_COMBO);
+
+// new code as of 2020-12-22
+// https://randomnerdtutorials.com/esp-now-many-to-one-esp8266-nodemcu/
+  esp_now_set_self_role(ESP_NOW_ROLE_SLAVE);
 
   esp_now_register_recv_cb([](uint8_t *mac, uint8_t *data, uint8_t len) {
 
