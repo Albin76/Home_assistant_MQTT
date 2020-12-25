@@ -22,26 +22,18 @@ extern "C" {
  */
 uint8_t mac[] = {0x36, 0x33, 0x33, 0x33, 0x33, 0x33};
 void initVariant() {
-// Old code before 2020-12-22
-/*
-  WiFi.mode(WIFI_AP);
-  wifi_set_macaddr(SOFTAP_IF, &mac[0]);
-*/
 // new code as of 2020-12-22
 // https://randomnerdtutorials.com/get-change-esp32-esp8266-mac-address-arduino/
 // and
 // https://randomnerdtutorials.com/esp-now-many-to-one-esp8266-nodemcu/
   WiFi.mode(WIFI_STA);
   wifi_set_macaddr(STATION_IF, &mac[0]);
-  WiFi.disconnect();
+  WiFi.disconnect();  
 }
 
 void setup() {
-  Serial.begin(115200); Serial.println();
+  Serial.begin(9600); Serial.println();
   Serial.println("This is the ESP-NOW side ");
-
-// not using this anymore since 2020-12-22  
-//  Serial.print("This node AP mac: "); Serial.println(WiFi.softAPmacAddress());
   Serial.print("This node STA mac: "); Serial.println(WiFi.macAddress());
 
   initEspNow();

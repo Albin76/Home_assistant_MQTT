@@ -21,11 +21,18 @@
 #include "arduino_secrets.h" // In Arduino_secret: WIFI_SSID, WIFI_PASSWORD, MQTT_CLIENT_ID, MQTT_SENSOR_TOPIC, MQTT_USER, MQTT_PASSWORD
 
 #define BAUD_RATE 115200
+#define SWSERIAL_BAUD_RATE 9600
 #define MQTT_VERSION MQTT_VERSION_3_1_1
 
 //SoftwareSerial swSer(14, 12, false, 1024);
 //SoftwareSerial swSer(D5, D6, false, 1024);
-SoftwareSerial swSer(D5, D6); // test 20200122
+//SoftwareSerial swSer(D5, D6); // test 20200122
+//SoftwareSerial swSer(D5, D6, false, 1024);  // Ändrade tillbaka 2020-12-25 för att etsta om det är detta som är problemet med att det tappas info i serielkommunikationen. Rätt fram till det sänds seriellt.
+//Får fel vid compilering med ovan
+SoftwareSerial swSer;
+
+
+
 
 //-------- Customise these values -----------
 
@@ -60,8 +67,9 @@ void setup() {
   Serial.begin(115200); Serial.println();
   Serial.println("This is the WiFi side ");
 
-  swSer.begin(BAUD_RATE);
-
+  //swSer.begin(BAUD_RATE); Innan 2020-12-25
+  swSer.begin(SWSERIAL_BAUD_RATE, SWSERIAL_8N1,D5,D6,false,1024); // test med annan seriel. Verkar ha ändrat syntax
+  
   wifiConnect();
 
   // init the MQTT connection
@@ -120,10 +128,10 @@ void readSerial() {
 }
 
 void sendSensorData() {
-   Serial.print("deviceMac: ");  
-   Serial.println(deviceMac);
-   Serial.printf("sensor=%i, channelID=%i, MQTT_sensor_topic=%s, temp=%01f, humidity=%01f, pressure=%01f, battery=%01f\n", sensorData.sensor, sensorData.channelID, sensorData.MQTT_sensor_topic, sensorData.temp, sensorData.humidity, sensorData.pressure, sensorData.battLevelNow);
-   //sendMQTTMessage();
+   //Serial.print("deviceMac: ");  
+   //Serial.println(deviceMac);
+   Serial.printf("sensor=%i, channelID=%i, MQTT_sensor_topic=%s, temp=%01f, humidity=%01f, pressure=%01f, battery=%01f\r\n", sensorData.sensor, sensorData.channelID, sensorData.MQTT_sensor_topic, sensorData.temp, sensorData.humidity, sensorData.pressure, sensorData.battLevelNow);
+   //sendMQTTMessage();  // old
    publishData(sensorData.temp, sensorData.humidity, sensorData.pressure, sensorData.battLevelNow);
 
 }
@@ -131,7 +139,12 @@ void sendSensorData() {
 
 // klar
 void wifiConnect() {
-  WiFi.hostname(MQTT_CLIENT_ID); // Sketch menu ==> Tool ==> LwIP Variant xxxxx==> "V1.4 Higher Bandwidth"  // ej testat ännu (2020-06-13) 
+
+  //WiFi.hostname(MQTT_CLIENT_ID); // Sketch menu ==> Tool ==> LwIP Variant xxxxx==> "V1.4 Higher Bandwidth"  // ej testat ännu (2020-06-13) 
+  Serial.printf("Default hostname: %s\n", WiFi.hostname().c_str());
+  WiFi.hostname(MQTT_CLIENT_ID);
+  Serial.printf("New hostname: %s\n", WiFi.hostname().c_str());
+  
   WiFi.mode(WIFI_STA);
   Serial.print("Connecting to "); Serial.print(WIFI_SSID);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
@@ -162,8 +175,8 @@ void publishData(float p_temperature, float p_humidity, float p_pressure, float 
   root["humidity"] = (String)p_humidity;
   root["pressure"] = (String)p_pressure;
   root["battery"] = (String)p_battLevelNow;
-  root.prettyPrintTo(Serial);
-  Serial.println("");
+  //root.prettyPrintTo(Serial);
+  //Serial.println("");
   /*
      {
         "temperature": "23.20" ,

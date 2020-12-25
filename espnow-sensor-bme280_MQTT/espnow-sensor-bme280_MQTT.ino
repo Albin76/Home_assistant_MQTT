@@ -28,8 +28,9 @@ uint8_t remoteMac[] = {0x36, 0x33, 0x33, 0x33, 0x33, 0x33};
 
 #define WIFI_CHANNEL 1
 #define SLEEP_SECS 120 // 1 minute. can be removed for TPL5111
-#define SLEEP_SECS_SHORT 60 // 1 minute. Used when failed wifi or failed espnow init
-#define SEND_TIMEOUT 600  // 245 millis seconds timeout. This does not work. If set to 450 it takes that. Do not get response I think. 
+#define SLEEP_SECS_SHORT 60 // 1 minute. Short due to sporadic internal errors. Used when failed BME280
+#define SLEEP_SECS_LONG 300 // 5 minute. Longer due to external problems.       Used when failed wifi or failed espnow init
+#define SEND_TIMEOUT 300    // 245 millis seconds timeout. 
 #define CONNECTION_TIMEOUT 1000  // 
 //#define USING_BATTERY
 #define USING_DEEPSLEEP
@@ -51,10 +52,11 @@ struct __attribute__((packed)) SENSOR_DATA {
 // New struct
 struct __attribute__((packed)) SENSOR_DATA {
     int   checkstart;
-    int   sendno;
+    int   sendno;                
     int   sensor;
-    char  MQTT_sensor_topic[15];
-    int   millis;
+    char  MQTT_sensor_topic[15]; // "office/sensor1" or "office/error1"
+    int   millis;                // Missis just before constructing message. 
+    int   errormsg;              // Missis just before constructing message. 
     float temp;
     float humidity;
     float pressure;
@@ -65,17 +67,32 @@ struct __attribute__((packed)) SENSOR_DATA {
 } sensorData;
 */
 
-BME280 bme280;
+/*
+// New struct 2
+struct __attribute__((packed)) SENSOR_DATA {
+    int   sensor;
+    char  MQTT_sensor_topic[15]; // "office/sensor1" or "office/error1"
+    int   millis;                // Missis just before constructing message. 
+    int   errormsg;              // 0 = OK,  
+    float temp;
+    float humidity;
+    float pressure;
+    float battery;
+    float spare1;
+    float spare2;
+} sensorData;
+*/
 
-volatile boolean callbackCalled;
+BME280 bme280;
 
 // constants for battery reading
 const byte battLevelPin = A0;     //Used if Battery level is checked
 const float batteryCorrection = 5.10/1023; // Needs to increase from 5.0 to 5.1 to get accurate reading
 int sortValues[13]; // Used in sorting (Takes 13 readings and takes mean value)
 float battLevelRaw; // needed in calculation 
-int SENDSTATUS;
-uint8_t result = 1; // Added 2020-12-23
+uint8_t result = 1; // Result from callback. 0 is OK and 1 is Error
+volatile boolean callbackCalled;
+
 
 #ifdef USING_TPL5110
 const byte TPL5110DONEPIN = D1; // Used for TPL5110 (D1 for Wemos, 5 for esp8266
@@ -142,27 +159,16 @@ void setup() {
   esp_now_add_peer(remoteMac, ESP_NOW_ROLE_SLAVE, WIFI_CHANNEL, NULL, 0);
   
   
-  /*
-  SENDSTATUS = esp_now_register_send_cb([](uint8_t* mac, uint8_t sendStatus) {    // esp_now_register_send_cb to register sending callback function. 
-  //It will return ESP_NOW_SEND_SUCCESS in sending callback function if the data is received successfully on MAC layer. Otherwise, it will return ESP_NOW_SEND_FAIL. 
-  Serial.printf("send_cb, send done, status = %i\n", SENDSTATUS);  // var sendstatus
-  Serial.printf("After Send register: %i\n", millis());
-  //Was a go to sleep here before, but last part of message was cut. Probably possible to optimise so sleep is called at correct time. 
-  callbackCalled = true;
-  });
-  callbackCalled = false;  // Ändrat
-  */
-
-  // testing vatiant.
-  //SENDSTATUS = esp_now_register_send_cb(OnDataSent);  // should it be between  esp_now_set_self_role and esp_now_add_peer as in randonmerdtutorials?
-
-  // testing 2020-12-23  Ej testat ännu. Does not compile...
+   // testing 2020-12-23  
   esp_now_register_send_cb([](uint8_t* mac, uint8_t result2){    // esp_now_register_send_cb to register sending callback function. 
-  result=result2;
-  Serial.printf("send_cb, send done, status = %i\n", result);  // var sendstatus
-  Serial.printf("After Send register: %i\n", millis());
+  result=result2;  // 0 is OK, 1 is Error
+  Serial.printf("Callback recieved with status = %i (0 is OK and 1 is Error). Time: %i \n", result, millis());  // 
+  callbackCalled = true;  //Set to true ehen callback is called
   });
 
+  callbackCalled = false; // Set to false in begining
+
+/*
 // Test with static
   sensorData.sensor = 1;
   sensorData.channelID =222222;
@@ -172,6 +178,7 @@ void setup() {
   sensorData.pressure=1000000;
   sensorData.battLevelNow=0.0;
 // End of test with static
+*/
  
   uint8_t bs[sizeof(sensorData)];
   Serial.printf("Size of sensorData: ");
@@ -183,25 +190,24 @@ void setup() {
   esp_now_send(NULL, bs, sizeof(sensorData)); // NULL means send to all peers
   
   Serial.printf("After Send: %i\n", millis());
-  //gotoSleep();
 }
 
 // sends and then goes into a loop and waits for callback=1 or timeout.
 void loop() {  // Ändrat
-  if (millis() > SEND_TIMEOUT ) {  //sendStatus==1 || 
-    Serial.printf("In loop sendStatus = %i\n", result);  // Ändrade 2020-12-23
-    Serial.print("Going to sleep: "); 
-    Serial.println(millis()); 
-    //Serial.println("Delay for 100ms");
-    //delay(100);
-    gotoSleep(SLEEP_SECS);
+  if (callbackCalled || millis() > SEND_TIMEOUT ) {  // CallbackCalled true or SEND_TIMEOUT reached. 
+    if (millis() > SEND_TIMEOUT) {  // Timeout
+      Serial.printf("Send timeout, short sleep \n"); 
+      gotoSleep(SLEEP_SECS_SHORT);
+      }
+    else if (callbackCalled && result) {  // Callback recieved and result from callback is error (1).
+      Serial.printf("Callback gave error, short sleep \n"); 
+      gotoSleep(SLEEP_SECS_SHORT);
+      }
+    else {  // Not timeout and callback gave ok
+      Serial.printf("Callback OK and no timeout, normal sleep \n"); 
+      gotoSleep(SLEEP_SECS);
+      }    
   }
-}
-
-void OnDataSent(uint8_t *mac_addr, uint8_t sendStatus) {
-  Serial.print("Status: ");
-  Serial.println(sendStatus);  // 0 is OK, 1 is Error
-  delay(100);
 }
 
 void readBME280() {
@@ -279,8 +285,7 @@ void sort(int a[], int size) {
 
 void gotoSleep(int sleepSecs) {
 
-  #ifdef USING_DEEPSLEEP
-  //int sleepSecs = SLEEP_SECS; // added as parameter in function instead
+  #ifdef USING_DEEPSLEEP  
   Serial.printf("Up for %i ms, going to sleep for %i secs...\n", millis(), sleepSecs); 
   Serial.println(); 
   Serial.println();  
