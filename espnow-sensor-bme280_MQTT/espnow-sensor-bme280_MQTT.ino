@@ -27,9 +27,9 @@ extern "C" {
 uint8_t remoteMac[] = {0x36, 0x33, 0x33, 0x33, 0x33, 0x33};
 
 #define WIFI_CHANNEL 1
-#define SLEEP_SECS 500 // 5 minute. can be removed for TPL5111
+#define SLEEP_SECS 120 // 1 minute. can be removed for TPL5111
 #define SLEEP_SECS_SHORT 60 // 1 minute. Used when failed wifi or failed espnow init
-#define SEND_TIMEOUT 300  // 245 millis seconds timeout. This does not work. If set to 450 it takes that. Do not get response I think. 
+#define SEND_TIMEOUT 600  // 245 millis seconds timeout. This does not work. If set to 450 it takes that. Do not get response I think. 
 #define CONNECTION_TIMEOUT 1000  // 
 //#define USING_BATTERY
 #define USING_DEEPSLEEP
@@ -38,7 +38,7 @@ uint8_t remoteMac[] = {0x36, 0x33, 0x33, 0x33, 0x33, 0x33};
 
 // keep in sync with slave struct
 struct __attribute__((packed)) SENSOR_DATA {
-    int   sensor;  // intiger of teh sensor number, ie 3 equals Sensor3
+    int   sensor;  // intiger of the sensor number, ie 3 equals Sensor3
     int   channelID;  // not used any more
     char  MQTT_sensor_topic[15];  // uncertain if needs to be exact length (length + 1 before)
     float temp;
@@ -75,6 +75,7 @@ const float batteryCorrection = 5.10/1023; // Needs to increase from 5.0 to 5.1 
 int sortValues[13]; // Used in sorting (Takes 13 readings and takes mean value)
 float battLevelRaw; // needed in calculation 
 int SENDSTATUS;
+uint8_t result = 1; // Added 2020-12-23
 
 #ifdef USING_TPL5110
 const byte TPL5110DONEPIN = D1; // Used for TPL5110 (D1 for Wemos, 5 for esp8266
@@ -104,7 +105,7 @@ void setup() {
   sensorData.spare2 = 0.0;
   sensorData.checkend = 1111;
 */
-
+  WiFi.persistent(false); // Shall save time See XXX
   sensorData.sensor = MQTT_SENSOR_NO;
   sensorData.channelID = 275152;
   strcpy(sensorData.MQTT_sensor_topic, MQTT_SENSOR_TOPIC);
@@ -134,7 +135,7 @@ void setup() {
 
   if (esp_now_init() != 0) {         
     Serial.println("*** ESP_Now init failed");  // If failed then go to sleep.
-    gotoSleep(SLEEP_SECS);
+    gotoSleep(SLEEP_SECS_SHORT);
   }
   Serial.printf("Before Send: %i\n", millis());
   esp_now_set_self_role(ESP_NOW_ROLE_CONTROLLER);
@@ -153,8 +154,24 @@ void setup() {
   */
 
   // testing vatiant.
-  SENDSTATUS = esp_now_register_send_cb(OnDataSent);  // should it be between  esp_now_set_self_role and esp_now_add_peer as in randonmerdtutorials?
-  
+  //SENDSTATUS = esp_now_register_send_cb(OnDataSent);  // should it be between  esp_now_set_self_role and esp_now_add_peer as in randonmerdtutorials?
+
+  // testing 2020-12-23  Ej testat ännu. Does not compile...
+  esp_now_register_send_cb([](uint8_t* mac, uint8_t result2){    // esp_now_register_send_cb to register sending callback function. 
+  result=result2;
+  Serial.printf("send_cb, send done, status = %i\n", result);  // var sendstatus
+  Serial.printf("After Send register: %i\n", millis());
+  });
+
+// Test with static
+  sensorData.sensor = 1;
+  sensorData.channelID =222222;
+  //sensorData.MQTT_sensor_topic
+  sensorData.temp=10.0;
+  sensorData.humidity=20.0;
+  sensorData.pressure=1000000;
+  sensorData.battLevelNow=0.0;
+// End of test with static
  
   uint8_t bs[sizeof(sensorData)];
   Serial.printf("Size of sensorData: ");
@@ -172,7 +189,7 @@ void setup() {
 // sends and then goes into a loop and waits for callback=1 or timeout.
 void loop() {  // Ändrat
   if (millis() > SEND_TIMEOUT ) {  //sendStatus==1 || 
-    Serial.printf("In loop sendStatus = %i\n", SENDSTATUS);
+    Serial.printf("In loop sendStatus = %i\n", result);  // Ändrade 2020-12-23
     Serial.print("Going to sleep: "); 
     Serial.println(millis()); 
     //Serial.println("Delay for 100ms");
@@ -183,7 +200,7 @@ void loop() {  // Ändrat
 
 void OnDataSent(uint8_t *mac_addr, uint8_t sendStatus) {
   Serial.print("Status: ");
-  Serial.println(sendStatus);
+  Serial.println(sendStatus);  // 0 is OK, 1 is Error
   delay(100);
 }
 
@@ -206,7 +223,7 @@ void readBME280() {
   if (bme280.beginI2C() == false) //Begin communication over I2C
   {
     Serial.println("The sensor did not respond. Please check wiring. Going to sleep.");
-    gotoSleep(SLEEP_SECS);
+    gotoSleep(SLEEP_SECS_SHORT);
   }
   //Serial.print("bme280 init="); Serial.println(bme280.begin(), HEX);
   sensorData.temp = bme280.readTempC();
@@ -228,7 +245,7 @@ void checkreadings(){
       return;
       }
     }
-  gotoSleep(SLEEP_SECS);
+  gotoSleep(SLEEP_SECS_SHORT);
 }
 
 void batteryreading(){
@@ -268,6 +285,7 @@ void gotoSleep(int sleepSecs) {
   Serial.println(); 
   Serial.println();  
   ESP.deepSleep(sleepSecs * 1000000, RF_NO_CAL);
+  delay(1000); // Give time to get to sleep
   //ESP.deepSleepInstant(sleepSecs * 1000000, RF_NO_CAL); // Längre tid och drog mer ström med core beta!!!
   #endif
 
