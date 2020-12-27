@@ -2,6 +2,7 @@
 Sensors and control via MQTT
 
 This rep is focused on the HA/MQTT part. 
+Focus is long battery time and stable execution. 
 
 struct __attribute__((packed)) SENSOR_DATA {\
         int     checkstart;\
