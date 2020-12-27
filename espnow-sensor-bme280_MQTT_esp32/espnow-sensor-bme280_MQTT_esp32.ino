@@ -44,15 +44,17 @@ The mosfets does not help. Only low if GND is disconnected. Only low currnt if G
 // test end
 
 #define WIFI_CHANNEL 1
-#define SLEEP_SECS 600 // 10 minute. Can be removed for TPL5110
-#define SLEEP_SECS_SHORT 60 // 1 minute. Used when failed wifi or failed espnow init
-#define SEND_TIMEOUT 245  // 245 millis seconds timeout. This does not work. If set to 450 it takes that. Do not get response I think. Not configured at receiver?
-
+#define SLEEP_SECS 120 // 2 minute. Can be removed for TPL5110
+#define SLEEP_SECS_SHORT 60 // 1 minute. Short due to sporadic internal errors. Used when failed BME280
+#define SLEEP_SECS_LONG 300 // 5 minute. Longer due to external problems.       Used when failed wifi or failed espnow init
+#define SEND_TIMEOUT 300  // 245 millis seconds timeout. This does not work. If set to 450 it takes that. Do not get response I think. Not configured at receiver?
+#define USING_BATTERY
 //#define USING_DEEPSLEEP
-#define USING_DEEPSLEEP_ESP32
+//#define USING_DEEPSLEEP_ESP32
+#define USING_DEEPSLEEP_ESP32_BASIC // This uses only deep sleep example code. No extra. Combine with setsleepsettingsesp32basic();
 //#define USING_TPL5110
 //#define USING_TPL5110_BARE
-#define USING_SENSOR_MOSFET
+//#define USING_SENSOR_MOSFET
 
 // keep in sync with slave struct
 struct __attribute__((packed)) SENSOR_DATA {
@@ -76,14 +78,16 @@ uint8_t dataToSend[maxDataFrameSize];
 
 BME280 bme280;
 
-volatile boolean callbackCalled;
-
 // constants for battery reading
 const byte battLevelPin = A0;     //Used if Battery level is checked
 const float batteryCorrection = 0.00176505333664306; // Needs to increase from 5.0 to 5.1 to get accurate reading
 int sortValues[13]; // Used in sorting (Takes 13 readings and takes mean value)
 float battLevelRaw; // needed in calculation 
 int SENDSTATUS;
+
+// for callback handling
+uint8_t result = 1; // Result from callback. 0 is OK and 1 is Error
+volatile boolean callbackCalled;
 
 #ifdef USING_TPL5110
 const byte TPL5110DONEPIN = D1; // Used for TPL5110 (D1 for Wemos, 5 for esp8266
@@ -116,6 +120,8 @@ void setup() {
     digitalWrite(25, HIGH);  // D2
   #endif 
   //adc_power_on(); // used in Savbee tips for lower sleepcurrent
+
+  WiFi.persistent(false); // Shall save time See https://arduinodiy.wordpress.com/2020/02/06/very-deep-sleep-and-energy-saving-on-esp8266-part-5-esp-now/
   sensorData.sensor = MQTT_SENSOR_NO;
   sensorData.channelID = 275152;
   strcpy(sensorData.MQTT_sensor_topic, MQTT_SENSOR_TOPIC);
@@ -124,39 +130,45 @@ void setup() {
 
   print_wakeup_reason();   //Print the wakeup reason for ESP32
 
-  setsleepsettingsesp32();
-  
+  //setsleepsettingsesp32();
+  setsleepsettingsesp32basic(); 
+
+  #ifdef USING_BATTERY
   Serial.printf("[TIMING] Before Battery reading: %i\n", millis());
   batteryreading();
   Serial.printf("[TIMING] Before BME280 read: %i\n", millis());
+  #endif
+  
   // read sensor first before awake generates heat
   //readBME280();
   readBME280test();  //ny. Worked 440uA to 22uA!!! 10,7uA with BME280 without 3.3V regulator 
+  checkreadings();
   Serial.printf("[TIMING] After BME280 read: %i\n", millis());
-  //WiFi.mode(WIFI_STA); // Station mode for esp-now sensor node // these are not in the minimal example. Takes long time. +60ms
-  //WiFi.disconnect();
+
+  // readded WIFI_STA and Disconnect 2020-12-26
+  // https://randomnerdtutorials.com/esp-now-many-to-one-esp32/
+  WiFi.mode(WIFI_STA); // Station mode for esp-now sensor node. These are not in the minimal example. 
+  Serial.printf("[TIMING] After Wifi STA: %i\n", millis());
+  WiFi.disconnect();  // Disconnect is only in example for ESP8266 and not ESP32
+  Serial.printf("[TIMING] After Wifi disconnect: %i\n", millis());
   //Serial.printf("After WIFI settings: %i\n", millis());
 
   Serial.printf("[ESPNOW] This mac: %s, ", WiFi.macAddress().c_str()); 
   Serial.printf("target mac: %02x%02x%02x%02x%02x%02x", remoteMac[0], remoteMac[1], remoteMac[2], remoteMac[3], remoteMac[4], remoteMac[5]); 
   Serial.printf(", channel: %i\n", WIFI_CHANNEL); 
-/*
-  if (esp_now_init() != 0) {         
-    Serial.println("*** ESP_Now init failed");  // If failed then go to sleep.
-    gotoSleep();
-  }
-  Serial.printf("Before Send: %i\n", millis());
-*/
-  WiFi.mode(WIFI_STA);  // needed for esp32
+
+  // WiFi.mode(WIFI_STA);  // needed for esp32 (Moved up 2020-12-26)
   //Serial.println( WiFi.softAPmacAddress() ); // Slightly different than mac. 
-  WiFi.disconnect(); // needed for esp32
+  //WiFi.disconnect(); // needed for esp32 (Moved up 2020-12-26)
+  Serial.printf("[TIMING] Before espnow init: %i\n", millis());
+  // This differs from esp8266.  
   if(esp_now_init() == ESP_OK)
   {
-    Serial.println("[ESPNOW] ESP NOW INIT!");
+    Serial.printf("[ESPNOW] ESP NOW INIT!: %i\n", millis());
   }
   else
   {
-    Serial.println("[ESPNOW] ESP NOW INIT FAILED....");
+    Serial.printf("[ESPNOW] ESP NOW INIT FAILED....!: %i\n", millis());
     setshortsleepsettingsesp32();  // Change sleeptime to short time
     gotoSleep();
   }  
@@ -166,11 +178,12 @@ void setup() {
   slave.encrypt = 0;
   if( esp_now_add_peer(peer) == ESP_OK)
   {
-    Serial.println("[ESPNOW] Added Peer!");
+    Serial.printf("[ESPNOW] Added Peer!: %i\n", millis());
   }
 
   esp_now_register_send_cb(OnDataSent);
- 
+  
+  callbackCalled = false; // Set to false in begining
   
   
   
@@ -197,7 +210,7 @@ void setup() {
   
   //esp_now_send(NULL, bs, sizeof(sensorData)); // NULL means send to all peers
 
- // this was the part before. removes the eso_ok check
+ // this was the part before. removes the esp_ok check
   if( esp_now_send(NULL, bs, sizeof(sensorData)) == ESP_OK)// was slave.peer_addr maxDataFrameSize
   {
     Serial.printf("\r\n[ESPNOW] Success Sent Value->\t%d", bs[0]); // sista parematern kan vara fel
@@ -205,12 +218,15 @@ void setup() {
   else
   {
     Serial.printf("\r\n[ESPNOW] DID NOT SEND....");
+    setshortsleepsettingsesp32();  // Change sleeptime to short time
+    gotoSleep();
   }
- 
   Serial.printf("After Send: %i\n", millis());
-  gotoSleep();  // med denna aktiv väntar man ej på svar, men det har jag ändå ej fått till.
+
 }
 
+/*
+// ska bort
 // sends and then goes into a loop and waits for callback=1 or timeout.
 void loop() {  // Ändrat
   if (millis() > SEND_TIMEOUT) {  //sendStatus==1 || 
@@ -220,7 +236,27 @@ void loop() {  // Ändrat
     gotoSleep();
   }
 }
+*/
 
+// sends and then goes into a loop and waits for callbackCalled = 1 or timeout.
+void loop() {  // Ändrat
+  if (callbackCalled || millis() > SEND_TIMEOUT ) {  // CallbackCalled true or SEND_TIMEOUT reached. 
+    if (millis() > SEND_TIMEOUT) {                   // Timeout
+      Serial.printf("[ESPNOW] Send timeout, short sleep \n"); 
+      setshortsleepsettingsesp32();  // Change sleeptime to short time
+      gotoSleep();
+      }
+    else if (callbackCalled && result) {             // Callback recieved and result from callback is error (1).
+      Serial.printf("[ESPNOW] Callback gave error, short sleep \n"); 
+      setshortsleepsettingsesp32();  // Change sleeptime to short time
+      gotoSleep();
+      }
+    else {                                           // Not timeout and callback gave ok
+      Serial.printf("[ESPNOW] Callback OK and no timeout, normal sleep \n"); 
+      gotoSleep();
+      }    
+  }
+}
 
 
 // denna drar mer ström
@@ -244,6 +280,7 @@ void readBME280() {
   if (bme280.beginI2C() == false) //Begin communication over I2C
   {
     Serial.println("The sensor did not respond. Please check wiring.");
+    setshortsleepsettingsesp32();  // Change sleeptime to short time
     gotoSleep();
   }
   //Serial.print("bme280 init="); Serial.println(bme280.begin(), HEX);
@@ -275,12 +312,64 @@ void readBME280test() {
   Serial.printf("[BME] Sensor readings:  temp=%01f, humidity=%01f, pressure=%01f\n", sensorData.temp, sensorData.humidity, sensorData.pressure);
 }
 
+void bmeSetup() {
+    // https://tinkerman.cat/post/low-power-weather-station-bme280-moteino/
+    bme280.settings.commInterface = I2C_MODE;
+    bme280.settings.I2CAddress = 0x76;
+    bme280.settings.runMode = 1;
+    bme280.settings.tStandby = 0;
+    bme280.settings.filter = 0;
+    bme280.settings.tempOverSample = 1;
+    bme280.settings.pressOverSample = 1;
+    bme280.settings.humidOverSample = 1;
+
+    // Make sure sensor had enough time to turn on. BME280 requires 2ms to start up
+    delay(10);
+    Serial.print("[BME] Begin output: ");
+    Serial.println(bme280.begin(), HEX);
+}
+
+void bmeForceRead() {
+    // https://tinkerman.cat/post/low-power-weather-station-bme280-moteino/
+    // We set the sensor in "forced mode" to force a reading.
+    // After the reading the sensor will go back to sleep mode.
+    uint8_t value = bme280.readRegister(BME280_CTRL_MEAS_REG);
+    value = (value & 0xFC) + 0x01;
+    bme280.writeRegister(BME280_CTRL_MEAS_REG, value);
+
+    // Measurement Time (as per BME280 datasheet section 9.1)
+    // T_max(ms) = 1.25
+    //  + (2.3 * T_oversampling)
+    //  + (2.3 * P_oversampling + 0.575)
+    //  + (2.4 * H_oversampling + 0.575)
+    //  ~ 9.3ms for current settings
+    delay(10);
+
+}
+
+// Not complete yet!
+void checkreadings(){
+  int var = 0;
+  while (var < 3) {
+    if (isnan(sensorData.temp) || isnan(sensorData.humidity) || isnan(sensorData.pressure) || sensorData.temp>50 || sensorData.temp<-40 || sensorData.humidity>100 || sensorData.humidity<0 || sensorData.pressure>13000 || sensorData.pressure<700) {
+      //Serial.println("ERROR: Unrealistic sensor readings. Retrying try no:");
+      Serial.printf("ERROR: Unrealistic sensor readings. Retrying. Try no: %i\n", var);
+      var++;
+      readBME280test();
+      } else {
+      return;
+      }
+    }
+    setshortsleepsettingsesp32();  // Change sleeptime to short time
+    gotoSleep();
+}
+
 void batteryreading(){
   for (byte i=0;i<12;i++)
   {
     sortValues[i]=analogRead(battLevelPin);
-    Serial.print("[BATT] Batt Level: ");
-    Serial.println(sortValues[i]); // Needed to use float to set decimals since not using serial.print(battLevelNow,4) directly.      
+//    Serial.print("[BATT] Batt Level: ");
+//    Serial.println(sortValues[i]); // Needed to use float to set decimals since not using serial.print(battLevelNow,4) directly.      
   }  
   sort(sortValues,13); //Pass in the values and the size.
   battLevelRaw = sortValues[6]/1.0; // Divides with 1.0 to get float
@@ -307,8 +396,8 @@ void sort(int a[], int size) {
 }
 
 /*
-Method to print the reason by which ESP32
-has been awaken from sleep
+Method to print the reason by which ESP32 has been awaken from sleep
+https://randomnerdtutorials.com/esp32-deep-sleep-arduino-ide-wake-up-sources/
 */
 void print_wakeup_reason(){
   esp_sleep_wakeup_cause_t wakeup_reason;
@@ -360,16 +449,33 @@ void gotoSleep() {
   
   WiFi.disconnect(true);
   WiFi.mode(WIFI_OFF);
-  btStop();
+  btStop();  // 
 
   //adc_power_off();
-  esp_wifi_stop();
-  esp_bt_controller_disable();  
+  esp_wifi_stop();  // better to use WiFi.disconnect(true); according to comments
+  esp_bt_controller_disable();  // Better to use WiFi.disconnect(true); according to comments
   // end of Savjee tips
+
+  
    
   esp_deep_sleep_start();
   Serial.println("[SLEEP] This will never be printed");
   #endif  
+
+  #ifdef USING_DEEPSLEEP_ESP32_BASIC
+  /*
+  Now that we have setup a wake cause and if needed setup the
+  peripherals state in deep sleep, we can now start going to
+  deep sleep.
+  In the case that no wake up sources were provided but deep
+  sleep was started, it will sleep forever unless hardware
+  reset occurs.
+  */
+  Serial.println("[SLEEP] Going to sleep now");
+  Serial.flush();
+  esp_deep_sleep_start();
+  Serial.println("[SLEEP] This will never be printed");
+  #endif
 
   #ifdef USING_TPL5110  
   delay(200);
@@ -405,6 +511,17 @@ void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status)
 {
   Serial.print("\r\n[ESPNOW] Last Packet Send Status:\t");
   Serial.print(status == ESP_NOW_SEND_SUCCESS ? "Delivery Success" : "Delivery Fail");
+  Serial.println("");
+
+  if (status == ESP_NOW_SEND_SUCCESS) {            // Success
+    Serial.printf("[ESPNOW] Setting result to 0 \n"); 
+    result=0;  // 0 is OK, 1 is Error
+    }
+  else {                                           // Error
+    Serial.printf("[ESPNOW] Setting result to 1 \n"); 
+    result=1;  // 0 is OK, 1 is Error
+    }  
+  callbackCalled = true;  //Set to true when callback is called. Needs to be set after result!
 }
 
 void  setshortsleepsettingsesp32()
@@ -416,7 +533,16 @@ void  setshortsleepsettingsesp32()
   " Seconds");
 }
 
-void  setsleepsettingsesp32()
+void  setlongsleepsettingsesp32()
+{
+  // overrides the long sleep with a short
+  int sleepSecsLong = SLEEP_SECS_LONG;
+  esp_sleep_enable_timer_wakeup(sleepSecsLong * 1000000);
+  Serial.println("[SLEEP] Short sleep: Setup ESP32 to sleep for " + String(sleepSecsLong) +
+  " Seconds");
+}
+
+void  setsleepsettingsesp32()  // something in this makes wake up reason not work.
 {
 /*
   First we configure the wake up source
@@ -447,41 +573,17 @@ void  setsleepsettingsesp32()
   //Serial.println("Configured all RTC Peripherals to be powered down in sleep");
 }
 
+void  setsleepsettingsesp32basic()  
+{
+/*
+  First we configure the wake up source
+  We set our ESP32 to wake up every 5 seconds
+  */
+  int sleepSecs = SLEEP_SECS;
+  esp_sleep_enable_timer_wakeup(sleepSecs * 1000000);
+  Serial.println("[SLEEP] Setup ESP32 to sleep for every " + String(sleepSecs) +
+  " Seconds");
+}
+
 // https://bitbucket.org/xoseperez/weatherstation_moteino/src/master/code/src/main.ino
 // https://tinkerman.cat/post/low-power-weather-station-bme280-moteino/
-
-void bmeForceRead() {
-    // https://tinkerman.cat/post/low-power-weather-station-bme280-moteino/
-    // We set the sensor in "forced mode" to force a reading.
-    // After the reading the sensor will go back to sleep mode.
-    uint8_t value = bme280.readRegister(BME280_CTRL_MEAS_REG);
-    value = (value & 0xFC) + 0x01;
-    bme280.writeRegister(BME280_CTRL_MEAS_REG, value);
-
-    // Measurement Time (as per BME280 datasheet section 9.1)
-    // T_max(ms) = 1.25
-    //  + (2.3 * T_oversampling)
-    //  + (2.3 * P_oversampling + 0.575)
-    //  + (2.4 * H_oversampling + 0.575)
-    //  ~ 9.3ms for current settings
-    delay(10);
-
-}
-
-void bmeSetup() {
-    // https://tinkerman.cat/post/low-power-weather-station-bme280-moteino/
-    bme280.settings.commInterface = I2C_MODE;
-    bme280.settings.I2CAddress = 0x76;
-    bme280.settings.runMode = 1;
-    bme280.settings.tStandby = 0;
-    bme280.settings.filter = 0;
-    bme280.settings.tempOverSample = 1;
-    bme280.settings.pressOverSample = 1;
-    bme280.settings.humidOverSample = 1;
-
-    // Make sure sensor had enough time to turn on. BME280 requires 2ms to start up
-    delay(10);
-  Serial.print("[BME] Begin output: ");
-    Serial.println(bme280.begin(), HEX);
-
-}

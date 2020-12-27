@@ -23,15 +23,11 @@ extern "C" {
 #include "SparkFunBME280.h"
 #include "arduino_secrets.h"  // In Arduino_secret: MQTT_CLIENT_ID, MQTT_SENSOR_NO, MQTT_SENSOR_TOPIC
 
-// this is the MAC Address of the remote ESP server which receives these sensor readings
-uint8_t remoteMac[] = {0x36, 0x33, 0x33, 0x33, 0x33, 0x33};
-
 #define WIFI_CHANNEL 1
 #define SLEEP_SECS 120 // 1 minute. can be removed for TPL5111
 #define SLEEP_SECS_SHORT 60 // 1 minute. Short due to sporadic internal errors. Used when failed BME280
 #define SLEEP_SECS_LONG 300 // 5 minute. Longer due to external problems.       Used when failed wifi or failed espnow init
 #define SEND_TIMEOUT 300    // 245 millis seconds timeout. 
-#define CONNECTION_TIMEOUT 1000  // 
 //#define USING_BATTERY
 #define USING_DEEPSLEEP
 //#define USING_TPL5110
@@ -55,8 +51,8 @@ struct __attribute__((packed)) SENSOR_DATA {
     int   sendno;                
     int   sensor;
     char  MQTT_sensor_topic[15]; // "office/sensor1" or "office/error1"
-    int   millis;                // Missis just before constructing message. 
-    int   errormsg;              // Missis just before constructing message. 
+    int   millis;                // Millis just before constructing message. 
+    int   errormsg;              // Error messages
     float temp;
     float humidity;
     float pressure;
@@ -85,11 +81,16 @@ struct __attribute__((packed)) SENSOR_DATA {
 
 BME280 bme280;
 
-// constants for battery reading
+// This is the MAC Address of the remote ESP server which receives these sensor readings
+uint8_t remoteMac[] = {0x36, 0x33, 0x33, 0x33, 0x33, 0x33};
+
+// for battery reading
 const byte battLevelPin = A0;     //Used if Battery level is checked
 const float batteryCorrection = 5.10/1023; // Needs to increase from 5.0 to 5.1 to get accurate reading
 int sortValues[13]; // Used in sorting (Takes 13 readings and takes mean value)
 float battLevelRaw; // needed in calculation 
+
+// for callback handling
 uint8_t result = 1; // Result from callback. 0 is OK and 1 is Error
 volatile boolean callbackCalled;
 
@@ -122,7 +123,7 @@ void setup() {
   sensorData.spare2 = 0.0;
   sensorData.checkend = 1111;
 */
-  WiFi.persistent(false); // Shall save time See XXX
+  WiFi.persistent(false); // Shall save time See https://arduinodiy.wordpress.com/2020/02/06/very-deep-sleep-and-energy-saving-on-esp8266-part-5-esp-now/
   sensorData.sensor = MQTT_SENSOR_NO;
   sensorData.channelID = 275152;
   strcpy(sensorData.MQTT_sensor_topic, MQTT_SENSOR_TOPIC);
@@ -136,13 +137,13 @@ void setup() {
   #endif
 
   // read sensor first before awake generates heat
-  readBME280();
+  readBME280();  // Change to code made in ESP32
   checkreadings();
   Serial.printf("After BME280 read: %i\n", millis());
+
   // readded WIFI_STA and Disconnect 2020-12-22
   // https://randomnerdtutorials.com/esp-now-many-to-one-esp8266-nodemcu/
-    
-  WiFi.mode(WIFI_STA); // Station mode for esp-now sensor node // these are not in the minimal example. Takes long time. +60ms
+  WiFi.mode(WIFI_STA); // Station mode for esp-now sensor node. These are not in the minimal example. Takes long time. +60ms. Needed since not in minimal?
   WiFi.disconnect();
   //Serial.printf("After WIFI settings: %i\n", millis());
   
@@ -158,19 +159,17 @@ void setup() {
   esp_now_set_self_role(ESP_NOW_ROLE_CONTROLLER);
   esp_now_add_peer(remoteMac, ESP_NOW_ROLE_SLAVE, WIFI_CHANNEL, NULL, 0);
   
-  
-   // testing 2020-12-23  
   esp_now_register_send_cb([](uint8_t* mac, uint8_t result2){    // esp_now_register_send_cb to register sending callback function. 
-  result=result2;  // 0 is OK, 1 is Error
-  Serial.printf("Callback recieved with status = %i (0 is OK and 1 is Error). Time: %i \n", result, millis());  // 
-  callbackCalled = true;  //Set to true ehen callback is called
+    result=result2;  // 0 is OK, 1 is Error
+    Serial.printf("Callback recieved with status = %i (0 is OK and 1 is Error). Time: %i \n", result, millis());  // 
+    callbackCalled = true;  //Set to true ehen callback is called
   });
 
   callbackCalled = false; // Set to false in begining
 
-/*
+
 // Test with static
-  sensorData.sensor = 1;
+  sensorData.sensor = 2;
   sensorData.channelID =222222;
   //sensorData.MQTT_sensor_topic
   sensorData.temp=10.0;
@@ -178,7 +177,7 @@ void setup() {
   sensorData.pressure=1000000;
   sensorData.battLevelNow=0.0;
 // End of test with static
-*/
+
  
   uint8_t bs[sizeof(sensorData)];
   Serial.printf("Size of sensorData: ");
@@ -192,18 +191,18 @@ void setup() {
   Serial.printf("After Send: %i\n", millis());
 }
 
-// sends and then goes into a loop and waits for callback=1 or timeout.
+// sends and then goes into a loop and waits for callbackCalled = 1 or timeout.
 void loop() {  // Ändrat
   if (callbackCalled || millis() > SEND_TIMEOUT ) {  // CallbackCalled true or SEND_TIMEOUT reached. 
-    if (millis() > SEND_TIMEOUT) {  // Timeout
+    if (millis() > SEND_TIMEOUT) {                   // Timeout
       Serial.printf("Send timeout, short sleep \n"); 
       gotoSleep(SLEEP_SECS_SHORT);
       }
-    else if (callbackCalled && result) {  // Callback recieved and result from callback is error (1).
+    else if (callbackCalled && result) {             // Callback recieved and result from callback is error (1).
       Serial.printf("Callback gave error, short sleep \n"); 
       gotoSleep(SLEEP_SECS_SHORT);
       }
-    else {  // Not timeout and callback gave ok
+    else {                                           // Not timeout and callback gave ok
       Serial.printf("Callback OK and no timeout, normal sleep \n"); 
       gotoSleep(SLEEP_SECS);
       }    
