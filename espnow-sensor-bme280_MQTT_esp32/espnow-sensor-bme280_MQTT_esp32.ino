@@ -5,7 +5,8 @@
  Program based on ESPNOW example. (from esp-now-tx-rx/esp32_transmiter)
  Hardware based on a simplified Kevin Darrahs Trigboard V4 but with components used in JonathanCaes PCB in Easyeda to get more handable packages for Mosfets.
  April 16 2019: Needs esp8266 core 2.5 to get down to fast execution if using esp8266.
- Februari 2020: firebeetle ESP32. Takes long to wake from drrpsleep. 1.1sec in total. 200 ms for code. The rest is validation. Is it possible to reduce from Arduino IDE?
+ Februari 2020: firebeetle ESP32. Takes long to wake from deepsleep. 1.1sec in total. 200 ms for code. The rest is validation. Is it possible to reduce from Arduino IDE?
+ Januari 2021: firebeetle ESP32. New core 408ms at 240MHz incl code. 158ms for code. 
  
  To do: 
  x Battery monitoring
@@ -34,8 +35,9 @@ The mosfets does not help. Only low if GND is disconnected. Only low currnt if G
 */
 #include <WiFi.h>
 #include <esp_now.h>
-#include "SparkFunBME280.h"
+#include "SparkFunBME280.h"   // 2.0.3 works but not newer
 #include "arduino_secrets.h"  // In Arduino_secret: MQTT_CLIENT_ID, MQTT_SENSOR_NO, MQTT_SENSOR_TOPIC
+#include <forcedClimate.h>  // This library is really fast! Version 3.0 https://github.com/JVKran/Forced-BME280
 
 // test start Savbee
 //#include "driver/adc.h"  // used in Savbee tips for lower sleepcurrent
@@ -44,10 +46,10 @@ The mosfets does not help. Only low if GND is disconnected. Only low currnt if G
 // test end
 
 #define WIFI_CHANNEL 1
-#define SLEEP_SECS 120 // 2 minute. Can be removed for TPL5110
+#define SLEEP_SECS 4 // 2 minute. Can be removed for TPL5110
 #define SLEEP_SECS_SHORT 60 // 1 minute. Short due to sporadic internal errors. Used when failed BME280
 #define SLEEP_SECS_LONG 300 // 5 minute. Longer due to external problems.       Used when failed wifi or failed espnow init
-#define SEND_TIMEOUT 300  // 245 millis seconds timeout. This does not work. If set to 450 it takes that. Do not get response I think. Not configured at receiver?
+#define SEND_TIMEOUT 4000  // 245 millis seconds timeout. This does not work. If set to 450 it takes that. Do not get response I think. Not configured at receiver?
 #define USING_BATTERY
 //#define USING_DEEPSLEEP
 //#define USING_DEEPSLEEP_ESP32
@@ -77,6 +79,7 @@ const esp_now_peer_info_t *peer = &slave;
 uint8_t dataToSend[maxDataFrameSize];
 
 BME280 bme280;
+ForcedClimate climateSensor = ForcedClimate(Wire, 0x76);  // BME280 forced library
 
 // constants for battery reading
 const byte battLevelPin = A0;     //Used if Battery level is checked
@@ -107,6 +110,14 @@ void setup() {
   digitalWrite(LED_BUILTIN, LOW);    // turn the LED off by making the voltage LOW
   delay(20);                       // wait for a second
 */  
+
+/*
+// test 27 https://savjee.be/2019/12/esp32-tips-to-increase-battery-life/  
+// Sligtly lower but dod not seem to start up reliably. Only tested at 80MHz
+  WiFi.disconnect(true);
+  WiFi.mode(WIFI_OFF);
+*/
+  
   #ifdef USING_TPL5110
     pinMode(TPL5110DONEPIN, OUTPUT);
     digitalWrite(TPL5110DONEPIN, LOW);
@@ -121,17 +132,23 @@ void setup() {
   #endif 
   //adc_power_on(); // used in Savbee tips for lower sleepcurrent
 
-  WiFi.persistent(false); // Shall save time See https://arduinodiy.wordpress.com/2020/02/06/very-deep-sleep-and-energy-saving-on-esp8266-part-5-esp-now/
+  //WiFi.persistent(false); // Shall save time See https://arduinodiy.wordpress.com/2020/02/06/very-deep-sleep-and-energy-saving-on-esp8266-part-5-esp-now/
+  // flyttade ner till alldeles innan start Wifi. Ingen skillnad men mer samlat.
+
+
   sensorData.sensor = MQTT_SENSOR_NO;
   sensorData.channelID = 275152;
   strcpy(sensorData.MQTT_sensor_topic, MQTT_SENSOR_TOPIC);
   
   Serial.begin(115200); Serial.println();
+  Serial.printf("[TIMING] Wake up: %i\n", millis());
 
   print_wakeup_reason();   //Print the wakeup reason for ESP32
 
   //setsleepsettingsesp32();
   setsleepsettingsesp32basic(); 
+
+  //bmeSetup2();  // Test 2021-01-01 Early so can use time for other things instead of delay.
 
   #ifdef USING_BATTERY
   Serial.printf("[TIMING] Before Battery reading: %i\n", millis());
@@ -141,12 +158,27 @@ void setup() {
   
   // read sensor first before awake generates heat
   //readBME280();
-  readBME280test();  //ny. Worked 440uA to 22uA!!! 10,7uA with BME280 without 3.3V regulator 
-  checkreadings();
-  Serial.printf("[TIMING] After BME280 read: %i\n", millis());
+  //readBME280test();  //ny. Worked 440uA to 22uA!!! 10,7uA with BME280 without 3.3V regulator 
 
-  // readded WIFI_STA and Disconnect 2020-12-26
-  // https://randomnerdtutorials.com/esp-now-many-to-one-esp32/
+  readBME280test2();  //ny. Forced BME280 library
+
+  Serial.printf("[TIMING] After BME280 read: %i\n", millis());
+  checkreadings();
+  Serial.printf("[TIMING] After Check readings: %i\n", millis());
+
+/*
+// Test28. 10MHz then 80MHz. Real bad idea +315%
+
+  // Options are: 240 (default), 160, 80, 40, 20 and 10 MHz
+  // 10MHz CPU before
+  setCpuFrequencyMhz(80);
+  int cpuSpeed = getCpuFrequencyMhz();
+  Serial.println("Running at " + String(cpuSpeed) + "MHz");
+*/
+
+
+  // https://randomnerdtutorials.com/esp-now-many-to-one-esp32/    
+  WiFi.persistent(false); // 2020-12-30 testar att lägga här istället inför test med Wifi off (test 27) Blev samma tid i millis
   WiFi.mode(WIFI_STA); // Station mode for esp-now sensor node. These are not in the minimal example. 
   Serial.printf("[TIMING] After Wifi STA: %i\n", millis());
   WiFi.disconnect();  // Disconnect is only in example for ESP8266 and not ESP32
@@ -184,22 +216,7 @@ void setup() {
   esp_now_register_send_cb(OnDataSent);
   
   callbackCalled = false; // Set to false in begining
-  
-  
-  
-  
-//  esp_now_set_self_role(ESP_NOW_ROLE_CONTROLLER);
-//  esp_now_add_peer(remoteMac, ESP_NOW_ROLE_SLAVE, WIFI_CHANNEL, NULL, 0);
-//  SENDSTATUS = esp_now_register_send_cb([](uint8_t* mac, uint8_t sendStatus) {    // esp_now_register_send_cb to register sending callback function. 
-
-    //It will return ESP_NOW_SEND_SUCCESS in sending callback function if the data is received successfully on MAC layer. Otherwise, it will return ESP_NOW_SEND_FAIL. 
-//  Serial.printf("send_cb, send done, status = %i\n", sendStatus);
-  Serial.printf("[TIMING] After Send register: %i\n", millis());
-  //Was a go to sleep here before, but last part of message was cut. Probably possible to optimise so sleep is called at correct time. 
-//  callbackCalled = true;
-//  });
-
-//  callbackCalled = false;  // Ändrat
+  Serial.printf("[TIMING] After Send register: %i\n", millis());  
   
   uint8_t bs[sizeof(sensorData)];
   Serial.printf("[ESPNOW] Size of sensorData: ");
@@ -225,20 +242,7 @@ void setup() {
 
 }
 
-/*
-// ska bort
-// sends and then goes into a loop and waits for callback=1 or timeout.
-void loop() {  // Ändrat
-  if (millis() > SEND_TIMEOUT) {  //sendStatus==1 || 
-    Serial.printf("[LOOP] In loop sendStatus = %i\n", SENDSTATUS);
-    Serial.print("[TIMING] Going to sleep: "); 
-    Serial.println(millis()); 
-    gotoSleep();
-  }
-}
-*/
-
-// sends and then goes into a loop and waits for callbackCalled = 1 or timeout.
+// Sends and then goes into a loop and waits for callbackCalled = 1 or timeout.
 void loop() {  // Ändrat
   if (callbackCalled || millis() > SEND_TIMEOUT ) {  // CallbackCalled true or SEND_TIMEOUT reached. 
     if (millis() > SEND_TIMEOUT) {                   // Timeout
@@ -259,7 +263,7 @@ void loop() {  // Ändrat
 }
 
 
-// denna drar mer ström
+// denna drar mer ström. Not used
 void readBME280() {
   #ifdef USING_TPL5110
   Wire.begin(D5,D6); // La till för att ändra D1, D2 till D4 och D5 så att D1 kan användas av TPL5110
@@ -267,8 +271,10 @@ void readBME280() {
   #ifdef USING_TPL5110_BARE
   Wire.begin(14,12); // La till för att ändra D1, D2 till D4 och D5 så att D1 kan användas av TPL5110
   #endif
-
-
+  #ifdef USING_DEEPSLEEP_ESP32_BASIC
+  Wire.begin(); // Om ej TPL5110 och använder standard
+  //Wire.setClock(400000); //Increase to fast I2C speed!  
+  #endif
   
   bme280.settings.commInterface = I2C_MODE;
   bme280.settings.I2CAddress = 0x76;
@@ -299,20 +305,29 @@ void readBME280test() {
   #ifdef USING_TPL5110_BARE
   Wire.begin(14,12); // La till för att ändra D1, D2 till D4 och D5 så att D1 kan användas av TPL5110
   #endif
-  #ifdef USING_DEEPSLEEP_ESP32
+  #ifdef USING_DEEPSLEEP_ESP32_BASIC
   Wire.begin(); // Om ej TPL5110 och använder standard
+  //Wire.setClock(400000); //Increase to fast I2C speed!  
   #endif
 
   bmeSetup();
+  Serial.printf("[TIMING] After BME280 Setup: %i\n", millis());
+
   bmeForceRead();
+  Serial.printf("[TIMING] After BME280 Force read: %i\n", millis());
+
 
   sensorData.temp = bme280.readTempC();
   sensorData.humidity = bme280.readFloatHumidity();
   sensorData.pressure = bme280.readFloatPressure() / 100.0;
   Serial.printf("[BME] Sensor readings:  temp=%01f, humidity=%01f, pressure=%01f\n", sensorData.temp, sensorData.humidity, sensorData.pressure);
+
+
 }
 
 void bmeSetup() {
+
+    
     // https://tinkerman.cat/post/low-power-weather-station-bme280-moteino/
     bme280.settings.commInterface = I2C_MODE;
     bme280.settings.I2CAddress = 0x76;
@@ -327,6 +342,7 @@ void bmeSetup() {
     delay(10);
     Serial.print("[BME] Begin output: ");
     Serial.println(bme280.begin(), HEX);
+    
 }
 
 void bmeForceRead() {
@@ -347,6 +363,22 @@ void bmeForceRead() {
 
 }
 
+void readBME280test2() {
+  // 
+  climateSensor.begin();
+  climateSensor.takeForcedMeasurement();
+  // Instead of "takeForcedMeasurement();" one can also use one of getTemperature(true), 
+  // getHumidity(true) or getPressure(true) to perform a forced measurement.
+  Serial.printf("[TIMING] Measurement done: %i\n", millis()); 
+  sensorData.temp = climateSensor.getTemperatureCelcius();
+  sensorData.humidity = climateSensor.getRelativeHumidity();
+  sensorData.pressure = climateSensor.getPressure();
+  Serial.printf("[BME] Sensor readings:  temp=%01f, humidity=%01f, pressure=%01f\n", sensorData.temp, sensorData.humidity, sensorData.pressure);
+  Serial.printf("[TIMING] After BME280 Force read: %i\n", millis());
+}
+
+
+
 // Not complete yet!
 void checkreadings(){
   int var = 0;
@@ -355,7 +387,7 @@ void checkreadings(){
       //Serial.println("ERROR: Unrealistic sensor readings. Retrying try no:");
       Serial.printf("ERROR: Unrealistic sensor readings. Retrying. Try no: %i\n", var);
       var++;
-      readBME280test();
+      readBME280test();  
       } else {
       return;
       }
@@ -442,7 +474,8 @@ void gotoSleep() {
   sleep was started, it will sleep forever unless hardware
   reset occurs.
   */
-  Serial.println("[SLEEP] Going to sleep now");
+  //Serial.println("[SLEEP] Going to sleep now");
+  Serial.printf("[TIMING] Going to sleep now: %i\n", millis());
   Serial.flush();
 
   // https://www.savjee.be/2019/12/esp32-tips-to-increase-battery-life/
@@ -471,7 +504,8 @@ void gotoSleep() {
   sleep was started, it will sleep forever unless hardware
   reset occurs.
   */
-  Serial.println("[SLEEP] Going to sleep now");
+  //Serial.println("[SLEEP] Going to sleep now");
+  Serial.printf("[TIMING] Going to sleep now: %i\n", millis());
   Serial.flush();
   esp_deep_sleep_start();
   Serial.println("[SLEEP] This will never be printed");
