@@ -60,7 +60,7 @@ The mosfets does not help. Only low if GND is disconnected. Only low currnt if G
 
 // keep in sync with slave struct
 struct __attribute__((packed)) SENSOR_DATA {
-    int   sensor;  // intiger of teh sensor number, ie 3 equals Sensor3
+    int   sensor;  // int of the sensor number, ie 3 equals Sensor3
     int   channelID;  // not used any more
     char  MQTT_sensor_topic[15];  // uncertain if needs to be exact length (length + 1 before)
     float temp;
@@ -104,12 +104,15 @@ const byte TPL5110DONEPIN = 5; // Used for TPL5110 (D1 for Wemos, 5 for esp8266
 
   
 void setup() {
-/*  pinMode(LED_BUILTIN, OUTPUT);  // test led
-  digitalWrite(LED_BUILTIN, HIGH);   // turn the LED on (HIGH is the voltage level)
-  delay(100);                       // wait for a second
-  digitalWrite(LED_BUILTIN, LOW);    // turn the LED off by making the voltage LOW
+
+/*  
+  pinMode(25, OUTPUT);  // test led (D2)
+  digitalWrite(25, HIGH);   // turn the LED on (HIGH is the voltage level)
   delay(20);                       // wait for a second
-*/  
+  digitalWrite(25, LOW);    // turn the LED off by making the voltage LOW
+  delay(20);                       // wait for a second
+  pinMode(25, INPUT);  // test led  
+*/
 
 /*
 // test 27 https://savjee.be/2019/12/esp32-tips-to-increase-battery-life/  
