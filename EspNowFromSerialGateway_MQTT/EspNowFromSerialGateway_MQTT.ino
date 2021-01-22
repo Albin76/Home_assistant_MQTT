@@ -16,7 +16,7 @@
 
 #include <SPI.h>
 #include <PubSubClient.h>
-#include <ArduinoJson.h>
+#include <ArduinoJson.h> // Works with 5.13.5 but not newer yet.
 
 #include "arduino_secrets.h" // In Arduino_secret: WIFI_SSID, WIFI_PASSWORD, MQTT_CLIENT_ID, MQTT_SENSOR_TOPIC, MQTT_USER, MQTT_PASSWORD
 
@@ -32,7 +32,7 @@
 SoftwareSerial swSer;
 
 
-
+DynamicJsonDocument doc(256);  // version 6
 
 //-------- Customise these values -----------
 
@@ -62,6 +62,12 @@ struct __attribute__((packed)) SENSOR_DATA {
 //const PROGMEM char* MQTT_SENSOR_TOPIC = "office/sensor3"; // In Arduino Secrets now.
 
 volatile boolean haveReading = false;
+
+// char outstrT[15];  // Version 5
+// char outstrH[15]; // Version 5
+// char outstrP[15];// Version 5
+// char outstrB[15];// Version 5
+
 
 void setup() {
   Serial.begin(115200); Serial.println();
@@ -168,23 +174,50 @@ void callback(char* topic, byte* payload, unsigned int length) {
 void publishData(float p_temperature, float p_humidity, float p_pressure, float p_battLevelNow) {
   // create a JSON object
   // doc : https://github.com/bblanchon/ArduinoJson/wiki/API%20Reference
-  StaticJsonBuffer<200> jsonBuffer;
-  JsonObject& root = jsonBuffer.createObject();
+  // StaticJsonBuffer<200> jsonBuffer;  // V5
+  // JsonObject& root = jsonBuffer.createObject();  V5
   // INFO: the data must be converted into a string; a problem occurs when using floats...
+
+/*  // V5
+  dtostrf(p_temperature,7, 2, outstrT);  // need to remove leading spaces
+  dtostrf(p_humidity,7, 2, outstrH);  
+  dtostrf(p_pressure,8, 2, outstrP);
+  dtostrf(p_battLevelNow,7, 4, outstrB);
+  root["temperature"] = outstrT;
+  root["humidity"] = outstrH;
+  root["pressure"] = outstrP;
+  root["battery"] = outstrB;
+*/
+
+  doc["temperature"] = p_temperature;
+  doc["humidity"] = p_humidity;
+  doc["pressure"] = p_pressure;
+  doc["battery"] = p_battLevelNow;
+  
+  serializeJsonPretty(doc, Serial);
+
+/*  
   root["temperature"] = (String)p_temperature;
   root["humidity"] = (String)p_humidity;
   root["pressure"] = (String)p_pressure;
   root["battery"] = (String)p_battLevelNow;
   //root.prettyPrintTo(Serial);
   //Serial.println("");
+*/
   /*
      {
         "temperature": "23.20" ,
         "humidity": "43.70"
      }
   */
+
+  // ej klar med nedan tre rader!!!!
   char data[200];
-  root.printTo(data, root.measureLength() + 1);
+  serializeJson(doc, data); // ver6
+
+  
+  //root.printTo(data, root.measureLength() + 1); // ver 5
+  
   client.publish(sensorData.MQTT_sensor_topic, data, true);
   yield();
 }
