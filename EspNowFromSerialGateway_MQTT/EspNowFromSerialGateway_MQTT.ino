@@ -15,8 +15,8 @@
 #include <SoftwareSerial.h>
 
 #include <SPI.h>
-#include <PubSubClient.h>
-#include <ArduinoJson.h> // Works with 5.13.5 but not newer yet.
+#include <PubSubClient.h>  // 2021-01-24 was 2.6.0, now 2.8.0
+#include <ArduinoJson.h> // V6
 
 #include "arduino_secrets.h" // In Arduino_secret: WIFI_SSID, WIFI_PASSWORD, MQTT_CLIENT_ID, MQTT_SENSOR_TOPIC, MQTT_USER, MQTT_PASSWORD
 
@@ -63,12 +63,6 @@ struct __attribute__((packed)) SENSOR_DATA {
 
 volatile boolean haveReading = false;
 
-// char outstrT[15];  // Version 5
-// char outstrH[15]; // Version 5
-// char outstrP[15];// Version 5
-// char outstrB[15];// Version 5
-
-
 void setup() {
   Serial.begin(115200); Serial.println();
   Serial.println("This is the WiFi side ");
@@ -80,10 +74,9 @@ void setup() {
 
   // init the MQTT connection
   client.setServer(MQTT_SERVER_IP, MQTT_SERVER_PORT);
+  client.setKeepAlive(60);  // Home assistant has 60 s. PubSubClient has 15s as default. Was disconnecting often.  
   client.setCallback(callback);
   
-  //delay(100);
-  //ThingspeakConnect();
 }
 
 int heartBeat;
@@ -137,13 +130,10 @@ void sendSensorData() {
    //Serial.print("deviceMac: ");  
    //Serial.println(deviceMac);
    Serial.printf("sensor=%i, channelID=%i, MQTT_sensor_topic=%s, temp=%01f, humidity=%01f, pressure=%01f, battery=%01f\r\n", sensorData.sensor, sensorData.channelID, sensorData.MQTT_sensor_topic, sensorData.temp, sensorData.humidity, sensorData.pressure, sensorData.battLevelNow);
-   //sendMQTTMessage();  // old
-   publishData(sensorData.temp, sensorData.humidity, sensorData.pressure, sensorData.battLevelNow);
+   publishData(sensorData.sensor, sensorData.temp, sensorData.humidity, sensorData.pressure, sensorData.battLevelNow);
 
 }
 
-
-// klar
 void wifiConnect() {
 
   //WiFi.hostname(MQTT_CLIENT_ID); // Sketch menu ==> Tool ==> LwIP Variant xxxxx==> "V1.4 Higher Bandwidth"  // ej testat ännu (2020-06-13) 
@@ -171,24 +161,11 @@ void callback(char* topic, byte* payload, unsigned int length) {
   Serial.println();
 }
 
-void publishData(float p_temperature, float p_humidity, float p_pressure, float p_battLevelNow) {
+void publishData(int sensor, float p_temperature, float p_humidity, float p_pressure, float p_battLevelNow) {
   // create a JSON object
   // doc : https://github.com/bblanchon/ArduinoJson/wiki/API%20Reference
-  // StaticJsonBuffer<200> jsonBuffer;  // V5
-  // JsonObject& root = jsonBuffer.createObject();  V5
-  // INFO: the data must be converted into a string; a problem occurs when using floats...
 
-/*  // V5
-  dtostrf(p_temperature,7, 2, outstrT);  // need to remove leading spaces
-  dtostrf(p_humidity,7, 2, outstrH);  
-  dtostrf(p_pressure,8, 2, outstrP);
-  dtostrf(p_battLevelNow,7, 4, outstrB);
-  root["temperature"] = outstrT;
-  root["humidity"] = outstrH;
-  root["pressure"] = outstrP;
-  root["battery"] = outstrB;
-*/
-
+  doc["sensor"] = sensor;
   doc["temperature"] = p_temperature;
   doc["humidity"] = p_humidity;
   doc["pressure"] = p_pressure;
@@ -196,74 +173,12 @@ void publishData(float p_temperature, float p_humidity, float p_pressure, float 
   
   serializeJsonPretty(doc, Serial);
 
-/*  
-  root["temperature"] = (String)p_temperature;
-  root["humidity"] = (String)p_humidity;
-  root["pressure"] = (String)p_pressure;
-  root["battery"] = (String)p_battLevelNow;
-  //root.prettyPrintTo(Serial);
-  //Serial.println("");
-*/
-  /*
-     {
-        "temperature": "23.20" ,
-        "humidity": "43.70"
-     }
-  */
-
-  // ej klar med nedan tre rader!!!!
   char data[200];
-  serializeJson(doc, data); // ver6
-
-  
-  //root.printTo(data, root.measureLength() + 1); // ver 5
-  
+  serializeJson(doc, data); 
   client.publish(sensorData.MQTT_sensor_topic, data, true);
   yield();
 }
 
-/*
-void sendMQTTMessage(){
-  Serial.print("start sending: ");
-  Serial.println(millis());  
-
-// Create payload
-  String payload="field1=";
-  payload+=sensorData.temp;
-  payload+="&field2=";
-  payload+=sensorData.humidity;
-  payload+="&field3=";
-  payload+=sensorData.pressure;
-  payload+="&field4=";
-  payload+=sensorData.battLevelNow;      
-  payload+="&status=MQTTPUBLISH";
-
-// Create topic
-  String topic="channels/";
-  topic+=String(sensorData.channelID);
-  topic+="/publish/";
-  topic+=String(sensorData.MQTT_sensor_topic);
-
-// Reconnect if connection lost
-  if (!client.connected()){
-    Serial.print("Reconnecting: ");
-    Serial.println(millis());    
-    reconnect();
-    }
-    
-// Send    
-    Serial.print("Sending payload: ");
-    Serial.println(payload);
-    Serial.print("with topic: ");
-    Serial.println(topic);    
-    
-    client.publish((char*) topic.c_str(), (char*) payload.c_str()); 
-    Serial.println("Publish ok");
-    Serial.print("Done: ");
-    Serial.println(millis());
-    delay(100);
-}
-*/
 void reconnect() 
 {
   // Loop until reconnected.
