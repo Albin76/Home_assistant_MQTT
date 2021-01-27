@@ -19,3 +19,5 @@ struct __attribute__((packed)) SENSOR_DATA {\
 	float	spare2;\
 	int	checkend;\
 } sensorData;		
+
+ESP32 is not the latest. Continued improvements in Visual code studio in separate rep.
