@@ -46,6 +46,7 @@ PubSubClient client(wifiClient);
 
 String deviceMac;
 
+/*
 // keep in sync with ESP_NOW sensor struct
 struct __attribute__((packed)) SENSOR_DATA {
     int   sensor;
@@ -56,7 +57,20 @@ struct __attribute__((packed)) SENSOR_DATA {
     float pressure;
     float battLevelNow;    
 } sensorData;
+*/
 
+// keep in sync with slave struct
+struct __attribute__((packed)) SENSOR_DATA {
+    int   sensor;
+    char  MQTT_sensor_topic[15];
+    unsigned long   millis;
+    float temp;
+    float humidity;
+    float pressure;
+    float battery;
+    int   spare1;
+    float spare2;
+} sensorData; 
 
 // MQTT: topic. Har ej från sensor innan jag mottagit!!!!
 //const PROGMEM char* MQTT_SENSOR_TOPIC = "office/sensor3"; // In Arduino Secrets now.
@@ -129,8 +143,10 @@ void readSerial() {
 void sendSensorData() {
    //Serial.print("deviceMac: ");  
    //Serial.println(deviceMac);
-   Serial.printf("sensor=%i, channelID=%i, MQTT_sensor_topic=%s, temp=%01f, humidity=%01f, pressure=%01f, battery=%01f\r\n", sensorData.sensor, sensorData.channelID, sensorData.MQTT_sensor_topic, sensorData.temp, sensorData.humidity, sensorData.pressure, sensorData.battLevelNow);
-   publishData(sensorData.sensor, sensorData.temp, sensorData.humidity, sensorData.pressure, sensorData.battLevelNow);
+   //Serial.printf("sensor=%i, channelID=%i, MQTT_sensor_topic=%s, temp=%01f, humidity=%01f, pressure=%01f, battery=%01f\r\n", sensorData.sensor, sensorData.channelID, sensorData.MQTT_sensor_topic, sensorData.temp, sensorData.humidity, sensorData.pressure, sensorData.battLevelNow);
+   //publishData(sensorData.sensor, sensorData.temp, sensorData.humidity, sensorData.pressure, sensorData.battLevelNow);
+   Serial.printf("sensor=%i, MQTT_sensor_topic=%s, millis=%lu, temp=%01f, humidity=%01f, pressure=%01f, battery=%01f, spare1=%i, spare2=%01f\r\n", sensorData.sensor, sensorData.MQTT_sensor_topic, sensorData.millis, sensorData.temp, sensorData.humidity, sensorData.pressure, sensorData.battery, sensorData.spare1, sensorData.spare2);
+   publishData(sensorData.sensor, sensorData.millis, sensorData.temp, sensorData.humidity, sensorData.pressure, sensorData.battery, sensorData.spare1, sensorData.spare2);
 
 }
 
@@ -161,15 +177,19 @@ void callback(char* topic, byte* payload, unsigned int length) {
   Serial.println();
 }
 
-void publishData(int sensor, float p_temperature, float p_humidity, float p_pressure, float p_battLevelNow) {
+void publishData(int sensor, unsigned long p_millis, float p_temperature, float p_humidity, float p_pressure, float p_battery, int p_spare1, float p_spare2) {
+
   // create a JSON object
   // doc : https://github.com/bblanchon/ArduinoJson/wiki/API%20Reference
 
   doc["sensor"] = sensor;
+  doc["millis"] = p_millis;  
   doc["temperature"] = p_temperature;
   doc["humidity"] = p_humidity;
   doc["pressure"] = p_pressure;
-  doc["battery"] = p_battLevelNow;
+  doc["battery"] = p_battery;
+  doc["spare1"] = p_spare1;
+  doc["spare2"] = p_spare2;  
   
   serializeJsonPretty(doc, Serial);
 
