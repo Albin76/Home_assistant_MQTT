@@ -20,7 +20,8 @@
 extern "C" {
   #include <espnow.h>
 }
-#include "SparkFunBME280.h"
+//#include "SparkFunBME280.h"
+#include <forcedClimate.h>  // This library is really fast! Version 3.0 https://github.com/JVKran/Forced-BME280
 #include "arduino_secrets.h"  // In Arduino_secret: MQTT_CLIENT_ID, MQTT_SENSOR_NO, MQTT_SENSOR_TOPIC
 
 #define WIFI_CHANNEL 1
@@ -33,6 +34,7 @@ extern "C" {
 //#define USING_TPL5110
 //#define USING_TPL5110_BARE
 
+/*
 // keep in sync with slave struct
 struct __attribute__((packed)) SENSOR_DATA {
     int   sensor;  // intiger of the sensor number, ie 3 equals Sensor3
@@ -43,43 +45,23 @@ struct __attribute__((packed)) SENSOR_DATA {
     float pressure;
     float battLevelNow;
 } sensorData;
+*/
 
-/*
-// New struct
+// keep in sync with slave struct
 struct __attribute__((packed)) SENSOR_DATA {
-    int   checkstart;
-    int   sendno;                
     int   sensor;
-    char  MQTT_sensor_topic[15]; // "office/sensor1" or "office/error1"
-    int   millis;                // Millis just before constructing message. 
-    int   errormsg;              // Error messages
+    char  MQTT_sensor_topic[15];
+    unsigned long   millis;
     float temp;
     float humidity;
     float pressure;
     float battery;
-    float spare1;
+    int   spare1;
     float spare2;
-    int checkend;
-} sensorData;
-*/
+} sensorData; 
 
-/*
-// New struct 2
-struct __attribute__((packed)) SENSOR_DATA {
-    int   sensor;
-    char  MQTT_sensor_topic[15]; // "office/sensor1" or "office/error1"
-    int   millis;                // Missis just before constructing message. 
-    int   errormsg;              // 0 = OK,  
-    float temp;
-    float humidity;
-    float pressure;
-    float battery;
-    float spare1;
-    float spare2;
-} sensorData;
-*/
 
-BME280 bme280;
+//BME280 bme280;
 
 // This is the MAC Address of the remote ESP server which receives these sensor readings
 uint8_t remoteMac[] = {0x36, 0x33, 0x33, 0x33, 0x33, 0x33};
@@ -104,6 +86,8 @@ const byte TPL5110DONEPIN = 5; // Used for TPL5110 (D1 for Wemos, 5 for esp8266
 // have not beem able to get the TPL5110 to work with any pins other than D1 and D2 so I2C needed to move from those pins. Used Wire.begin(D5,D6) for that before starting sensor.
 #endif
 
+ForcedClimate climateSensor = ForcedClimate(Wire, 0x76);
+
 void setup() {
   #ifdef USING_TPL5110
     pinMode(TPL5110DONEPIN, OUTPUT);
@@ -114,18 +98,15 @@ void setup() {
     digitalWrite(TPL5110DONEPIN, LOW);
   #endif  
 
-/*
+ 
 // For new struct.
-  sensorData.checkstart = 1111;
-  sensorData.sendno;
   sensorData.millis = 0;
   sensorData.spare1 = 0.0;
   sensorData.spare2 = 0.0;
-  sensorData.checkend = 1111;
-*/
+
   WiFi.persistent(false); // Shall save time See https://arduinodiy.wordpress.com/2020/02/06/very-deep-sleep-and-energy-saving-on-esp8266-part-5-esp-now/
   sensorData.sensor = MQTT_SENSOR_NO;
-  sensorData.channelID = 275152;
+  //sensorData.channelID = 275152;
   strcpy(sensorData.MQTT_sensor_topic, MQTT_SENSOR_TOPIC);
   
   Serial.begin(115200); Serial.println();
@@ -137,7 +118,8 @@ void setup() {
   #endif
 
   // read sensor first before awake generates heat
-  readBME280();  // Change to code made in ESP32
+  //readBME280();  // Change to code made in ESP32
+  readBME280forced();  // Forced
   checkreadings();
   Serial.printf("After BME280 read: %i\n", millis());
 
@@ -167,24 +149,14 @@ void setup() {
 
   callbackCalled = false; // Set to false in begining
 
-
-// Test with static
-  sensorData.sensor = 2;
-  sensorData.channelID =222222;
-  //sensorData.MQTT_sensor_topic
-  sensorData.temp=10.0;
-  sensorData.humidity=20.0;
-  sensorData.pressure=1000000;
-  sensorData.battLevelNow=0.0;
-// End of test with static
-
- 
+  sensorData.millis=millis();
   uint8_t bs[sizeof(sensorData)];
   Serial.printf("Size of sensorData: ");
   Serial.println(sizeof(sensorData));
   memcpy(bs, &sensorData, sizeof(sensorData));
   Serial.printf("Sending the following data: ");  
-  Serial.printf("sensor=%i, channelID=%i, MQTT_sensor_topic=%s, temp=%01f, humidity=%01f, pressure=%01f, battery=%01f\n", sensorData.sensor, sensorData.channelID, sensorData.MQTT_sensor_topic, sensorData.temp, sensorData.humidity, sensorData.pressure, sensorData.battLevelNow);
+//  Serial.printf("sensor=%i, channelID=%i, MQTT_sensor_topic=%s, temp=%01f, humidity=%01f, pressure=%01f, battery=%01f\n", sensorData.sensor, sensorData.channelID, sensorData.MQTT_sensor_topic, sensorData.temp, sensorData.humidity, sensorData.pressure, sensorData.battLevelNow);
+  Serial.printf("sensor=%i, MQTT_sensor_topic=%s, millis=%i, temp=%01f, humidity=%01f, pressure=%01f, battery=%01f, spare1=%i, spare2=%01f, \n", sensorData.sensor, sensorData.MQTT_sensor_topic, sensorData.millis, sensorData.temp, sensorData.humidity, sensorData.pressure, sensorData.battery, sensorData.spare1, sensorData.spare2);
   
   esp_now_send(NULL, bs, sizeof(sensorData)); // NULL means send to all peers
   
@@ -209,6 +181,7 @@ void loop() {  // Ändrat
   }
 }
 
+/*
 void readBME280() {
   #ifdef USING_TPL5110
   Wire.begin(D5,D6); // La till för att ändra D1, D2 till D4 och D5 så att D1 kan användas av TPL5110
@@ -236,6 +209,17 @@ void readBME280() {
   sensorData.pressure = bme280.readFloatPressure() / 100.0;
   Serial.printf("temp=%01f, humidity=%01f, pressure=%01f\n", sensorData.temp, sensorData.humidity, sensorData.pressure);
 }
+*/
+
+void readBME280forced() {
+  climateSensor.begin();
+  climateSensor.takeForcedMeasurement();
+  
+  sensorData.temp = climateSensor.getTemperatureCelcius();
+  sensorData.humidity = climateSensor.getRelativeHumidity();
+  sensorData.pressure = climateSensor.getPressure();
+  Serial.printf("temp=%01f, humidity=%01f, pressure=%01f\n", sensorData.temp, sensorData.humidity, sensorData.pressure);
+}
 
 // Not complete yet!
 void checkreadings(){
@@ -245,7 +229,8 @@ void checkreadings(){
       //Serial.println("ERROR: Unrealistic sensor readings. Retrying try no:");
       Serial.printf("ERROR: Unrealistic sensor readings. Retrying. Try no: %i\n", var);
       var++;
-      readBME280();
+      //readBME280();
+      readBME280forced();
       } else {
       return;
       }
@@ -262,10 +247,10 @@ void batteryreading(){
   battLevelRaw = sortValues[6]/1.0; // Divides with 1.0 to get float
   Serial.print("Batt Level Raw: ");
   Serial.print(battLevelRaw); // Needed to use float to set decimals since not using serial.print(battLevelNow,4) directly.  
-  sensorData.battLevelNow = sortValues[6]*batteryCorrection;
+  sensorData.battery = sortValues[6]*batteryCorrection;
   Serial.print(", Batt Level Now: ");
-  Serial.println(String(sensorData.battLevelNow,4)); // Needed to use float to set decimals since not using serial.print(battLevelNow,4) directly.     
-  Serial.printf("battery=%01f\n", sensorData.battLevelNow);
+  Serial.println(String(sensorData.battery,4)); // Needed to use float to set decimals since not using serial.print(battLevelNow,4) directly.     
+  Serial.printf("battery=%01f\n", sensorData.battery);
 
 }
 
