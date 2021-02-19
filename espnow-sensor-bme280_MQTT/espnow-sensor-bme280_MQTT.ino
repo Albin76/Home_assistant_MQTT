@@ -25,7 +25,7 @@ extern "C" {
 #include "arduino_secrets.h"  // In Arduino_secret: MQTT_CLIENT_ID, MQTT_SENSOR_NO, MQTT_SENSOR_TOPIC
 
 #define WIFI_CHANNEL 1
-#define SLEEP_SECS 120 // 1 minute. can be removed for TPL5111
+#define SLEEP_SECS 60 // 1 minute. Can be removed for TPL5111
 #define SLEEP_SECS_SHORT 60 // 1 minute. Short due to sporadic internal errors. Used when failed BME280
 #define SLEEP_SECS_LONG 300 // 5 minute. Longer due to external problems.       Used when failed wifi or failed espnow init
 #define SEND_TIMEOUT 300    // 245 millis seconds timeout. 
@@ -33,19 +33,6 @@ extern "C" {
 #define USING_DEEPSLEEP
 //#define USING_TPL5110
 //#define USING_TPL5110_BARE
-
-/*
-// keep in sync with slave struct
-struct __attribute__((packed)) SENSOR_DATA {
-    int   sensor;  // intiger of the sensor number, ie 3 equals Sensor3
-    int   channelID;  // not used any more
-    char  MQTT_sensor_topic[15];  // uncertain if needs to be exact length (length + 1 before)
-    float temp;
-    float humidity;
-    float pressure;
-    float battLevelNow;
-} sensorData;
-*/
 
 // keep in sync with slave struct
 struct __attribute__((packed)) SENSOR_DATA {
@@ -182,6 +169,7 @@ void loop() {  // Ändrat
 }
 
 /*
+// if using adafruit
 void readBME280() {
   #ifdef USING_TPL5110
   Wire.begin(D5,D6); // La till för att ändra D1, D2 till D4 och D5 så att D1 kan användas av TPL5110
