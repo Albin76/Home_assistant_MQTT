@@ -29,7 +29,7 @@ extern "C" {
 #define SLEEP_SECS_SHORT 60 // 1 minute. Short due to sporadic internal errors. Used when failed BME280
 #define SLEEP_SECS_LONG 300 // 5 minute. Longer due to external problems.       Used when failed wifi or failed espnow init
 #define SEND_TIMEOUT 300    // 245 millis seconds timeout. 
-//#define USING_BATTERY
+#define USING_BATTERY
 #define USING_DEEPSLEEP
 //#define USING_TPL5110
 //#define USING_TPL5110_BARE
